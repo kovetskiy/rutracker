@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -41,6 +42,29 @@ var (
 	debugMode = false
 )
 
+type Tracker struct {
+	client  *http.Client
+	cookies *cookiejar.Jar
+	baseURL string
+}
+
+func NewTracker(baseURL string) (*Tracker, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	tracker := &Tracker{
+		client: &http.Client{
+			Jar: jar,
+		},
+		cookies: jar,
+		baseURL: baseURL,
+	}
+
+	return tracker, nil
+}
+
 func main() {
 	args := godocs.MustParse(os.ExpandEnv(usage), version, godocs.UsePager)
 
@@ -59,6 +83,13 @@ func main() {
 	debugMode = args["--debug"].(bool)
 	if debugMode {
 		logger.SetLevel(lorg.LevelDebug)
+	}
+
+	tracker, err := NewTracker(config.BaseURL)
+	if err != nil {
+		fatalh(
+			err, "unable to initialize",
+		)
 	}
 
 	client, err := authorize(
@@ -83,17 +114,18 @@ func main() {
 	}
 }
 
-func authorize(baseURL, username, password string) (*http.Client, error) {
+func (tracker *Tracker) Authorize(
+	baseURL, username, password string,
+) error {
 	payload := url.Values{}
 	payload.Set("login_username", username)
 	payload.Set("login_password", password)
 
 	target := strings.TrimRight(baseURL, "/") + "/forum/login.php"
 
-	jar, _ := cookiejar.New(nil)
-
-	client := &http.Client{
-		Jar: jar,
+	request, err := http.NewRequest("POST", target, bytes.NewBufferString(payload.Encode()))
+	if err != nil {
+		return err
 	}
 
 	response, err := client.PostForm(target, payload)
